@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Allow: /api/health
+Allow: /api/cache/stats
+
+# Disallow sensitive endpoints
+Disallow: /api/jobs/
+Disallow: /api/cache
+Disallow: /api/validate

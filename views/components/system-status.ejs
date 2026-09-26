@@ -1,0 +1,50 @@
+<!-- System Status -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+    <div class="bg-white p-6 rounded-lg shadow">
+        <div class="flex items-center">
+            <div class="p-2 bg-green-100 rounded">
+                <i class="fas fa-server text-green-600"></i>
+            </div>
+            <div class="ml-4">
+                <p class="text-sm font-medium text-gray-600">Server Status</p>
+                <p id="server-status" class="text-lg font-semibold text-green-600">Online</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow">
+        <div class="flex items-center">
+            <div class="p-2 bg-blue-100 rounded">
+                <i class="fas fa-tasks text-blue-600"></i>
+            </div>
+            <div class="ml-4">
+                <p class="text-sm font-medium text-gray-600">Active Jobs</p>
+                <p id="active-jobs" class="text-lg font-semibold text-blue-600">0</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow">
+        <div class="flex items-center">
+            <div class="p-2 bg-purple-100 rounded">
+                <i class="fas fa-database text-purple-600"></i>
+            </div>
+            <div class="ml-4">
+                <p class="text-sm font-medium text-gray-600">Cache Entries</p>
+                <p id="cache-entries" class="text-lg font-semibold text-purple-600">0</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow">
+        <div class="flex items-center">
+            <div class="p-2 bg-yellow-100 rounded">
+                <i class="fas fa-clock text-yellow-600"></i>
+            </div>
+            <div class="ml-4">
+                <p class="text-sm font-medium text-gray-600">Queue Position</p>
+                <p id="queue-position" class="text-lg font-semibold text-yellow-600">-</p>
+            </div>
+        </div>
+    </div>
+</div>

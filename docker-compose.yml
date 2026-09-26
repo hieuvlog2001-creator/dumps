@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  il2cpp-dumper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5555:5555"
+    environment:
+      - NODE_ENV=production
+      - PORT=5555
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5555/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - il2cpp-network
+
+networks:
+  il2cpp-network:
+    driver: bridge
+
+volumes:
+  uploads:
+  logs:

@@ -1,0 +1,105 @@
+<%- contentFor('head') %>
+    <style>
+        .file-drop-zone {
+            border: 2px dashed #cbd5e0;
+            transition: all 0.3s ease;
+        }
+        .file-drop-zone.dragover {
+            border-color: #4299e1;
+            background-color: #ebf8ff;
+        }
+        .progress-bar {
+            transition: width 0.3s ease;
+        }
+        .job-card {
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .log-output {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+    </style>
+
+<%- contentFor('modals') %>
+<%- include('components/modals') %>
+
+<%- contentFor('scripts') %>
+<%- include('components/scripts') %>
+
+<%- contentFor('body') %>
+
+<!-- Hero Section -->
+<section class="text-center mb-12" aria-labelledby="hero-heading">
+    <h2 id="hero-heading" class="text-3xl font-bold text-gray-900 mb-4">
+        Free Online Unity IL2CPP File Dumper
+                    </h2>
+    <p class="text-xl text-gray-600 max-w-3xl mx-auto mb-6">
+        Extract and decompile Unity IL2CPP binaries with ease. Upload your SO files and metadata,
+        get instant results without installation. Perfect for game developers and reverse engineers.
+    </p>
+    <div class="flex flex-wrap justify-center gap-4 text-sm text-gray-500">
+        <span class="inline-flex items-center">
+            <i class="fas fa-check-circle text-green-500 mr-2" aria-hidden="true"></i>
+            No Installation Required
+        </span>
+        <span class="inline-flex items-center">
+            <i class="fas fa-shield-alt text-blue-500 mr-2" aria-hidden="true"></i>
+            Secure Processing
+        </span>
+        <span class="inline-flex items-center">
+            <i class="fas fa-rocket text-purple-500 mr-2" aria-hidden="true"></i>
+            Real-time Results
+        </span>
+        <span class="inline-flex items-center">
+            <i class="fas fa-lock text-red-500 mr-2" aria-hidden="true"></i>
+            Bot Protection
+        </span>
+                            </div>
+</section>
+
+<!-- Main Application -->
+<section aria-labelledby="app-heading">
+    <h3 id="app-heading" class="sr-only">Il2CppDumper Application</h3>
+
+    <%- include('components/system-status') %>
+
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        <%- include('components/upload-form') %>
+        <%- include('components/job-history') %>
+                        </div>
+</section>
+
+<!-- Features Section -->
+<section class="mt-16 bg-white rounded-lg shadow-sm p-8" aria-labelledby="features-heading">
+    <h3 id="features-heading" class="text-2xl font-bold text-gray-900 mb-6 text-center">
+        Why Choose Il2CppDumper Online?
+    </h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="text-center">
+            <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-cloud text-blue-600 text-2xl" aria-hidden="true"></i>
+            </div>
+            <h4 class="font-semibold text-gray-900 mb-2">Cloud-Based</h4>
+            <p class="text-gray-600 text-sm">Process files online without downloading heavy tools</p>
+        </div>
+        <div class="text-center">
+            <div class="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-bolt text-green-600 text-2xl" aria-hidden="true"></i>
+            </div>
+            <h4 class="font-semibold text-gray-900 mb-2">Fast Processing</h4>
+            <p class="text-gray-600 text-sm">Real-time progress tracking and instant results</p>
+        </div>
+        <div class="text-center">
+            <div class="bg-purple-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-shield-alt text-purple-600 text-2xl" aria-hidden="true"></i>
+            </div>
+            <h4 class="font-semibold text-gray-900 mb-2">Secure</h4>
+            <p class="text-gray-600 text-sm">Advanced bot protection and secure file handling</p>
+        </div>
+    </div>
+</section>

@@ -1,0 +1,29 @@
+{
+    "name": "Il2CppDumper - Unity IL2CPP File Dumper",
+    "short_name": "Il2CppDumper",
+    "description": "Free online Il2CppDumper tool for Unity games. Dump IL2CPP binaries, extract metadata, and decompile Unity assemblies.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#2563eb",
+    "orientation": "portrait-primary",
+    "categories": ["developer-tools", "productivity", "utilities"],
+    "lang": "en-US",
+    "icons": [
+        {
+            "src": "/favicon-16x16.png",
+            "sizes": "16x16",
+            "type": "image/png"
+        },
+        {
+            "src": "/favicon-32x32.png",
+            "sizes": "32x32",
+            "type": "image/png"
+        },
+        {
+            "src": "/apple-touch-icon.png",
+            "sizes": "180x180",
+            "type": "image/png"
+        }
+    ]
+}

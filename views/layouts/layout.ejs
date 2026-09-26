@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Primary Meta Tags -->
+    <title><%= typeof title !== 'undefined' ? title : 'Il2CppDumper - Unity IL2CPP File Dumper & Decompiler Online' %></title>
+    <meta name="title" content="<%= typeof title !== 'undefined' ? title : 'Il2CppDumper - Unity IL2CPP File Dumper & Decompiler Online' %>">
+    <meta name="description" content="<%= typeof description !== 'undefined' ? description : 'Free online Il2CppDumper tool for Unity games. Dump IL2CPP binaries, extract metadata, and decompile Unity assemblies. No installation required - works in your browser.' %>">
+    <meta name="keywords" content="Il2CppDumper, Unity, IL2CPP, reverse engineering, game modding, decompiler, binary dumper, Unity assemblies, metadata extraction, game development tools">
+    <meta name="author" content="Il2CppDumper Team">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <meta name="language" content="English">
+    <meta name="revisit-after" content="7 days">
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="<%= typeof canonical !== 'undefined' ? canonical : 'https://' + (typeof req !== 'undefined' ? req.headers.host : 'your-domain.com') %>">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="<%= typeof canonical !== 'undefined' ? canonical : 'https://' + (typeof req !== 'undefined' ? req.headers.host : 'your-domain.com') %>">
+    <meta property="og:title" content="<%= typeof title !== 'undefined' ? title : 'Il2CppDumper - Unity IL2CPP File Dumper & Decompiler Online' %>">
+    <meta property="og:description" content="<%= typeof description !== 'undefined' ? description : 'Free online Il2CppDumper tool for Unity games. Dump IL2CPP binaries, extract metadata, and decompile Unity assemblies. No installation required.' %>">
+    <meta property="og:image" content="<%= typeof ogImage !== 'undefined' ? ogImage : 'https://' + (typeof req !== 'undefined' ? req.headers.host : 'your-domain.com') + '/images/il2cppdumper-og.jpg' %>">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:site_name" content="Il2CppDumper">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="<%= typeof canonical !== 'undefined' ? canonical : 'https://' + (typeof req !== 'undefined' ? req.headers.host : 'your-domain.com') %>">
+    <meta property="twitter:title" content="<%= typeof title !== 'undefined' ? title : 'Il2CppDumper - Unity IL2CPP File Dumper & Decompiler Online' %>">
+    <meta property="twitter:description" content="<%= typeof description !== 'undefined' ? description : 'Free online Il2CppDumper tool for Unity games. Dump IL2CPP binaries, extract metadata, and decompile Unity assemblies.' %>">
+    <meta property="twitter:image" content="<%= typeof ogImage !== 'undefined' ? ogImage : 'https://' + (typeof req !== 'undefined' ? req.headers.host : 'your-domain.com') + '/images/il2cppdumper-twitter.jpg' %>">
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+
+    <!-- Theme Color -->
+    <meta name="theme-color" content="#2563eb">
+    <meta name="msapplication-TileColor" content="#2563eb">
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Il2CppDumper",
+        "description": "Free online Il2CppDumper tool for Unity games. Dump IL2CPP binaries, extract metadata, and decompile Unity assemblies.",
+        "url": "<%= typeof canonical !== 'undefined' ? canonical : 'https://' + (typeof req !== 'undefined' ? req.headers.host : 'your-domain.com') %>",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Web Browser",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        },
+        "author": {
+            "@type": "Organization",
+            "name": "Il2CppDumper Team"
+        },
+        "featureList": [
+            "IL2CPP Binary Dumping",
+            "Metadata Extraction",
+            "Unity Assembly Decompilation",
+            "Real-time Progress Tracking",
+            "Secure File Processing",
+            "No Installation Required"
+        ],
+        "screenshot": "<%= typeof ogImage !== 'undefined' ? ogImage : 'https://' + (typeof req !== 'undefined' ? req.headers.host : 'your-domain.com') + '/images/il2cppdumper-screenshot.jpg' %>"
+    }
+    </script>
+
+    <!-- Common CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <!-- Cloudflare Turnstile -->
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
+    <!-- Resumable.js for chunked uploads -->
+    <script src="https://cdn.jsdelivr.net/npm/resumablejs@1.1.0/resumable.min.js"></script>
+
+    <!-- Page-specific head content -->
+    <%- head %>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b" role="banner">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center py-6">
+                <div class="flex items-center">
+                    <img src="/favicon-32x32.png" alt="Il2CppDumper Logo" class="w-8 h-8 mr-3" width="32" height="32">
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900">Il2CppDumper</h1>
+                        <p class="text-sm text-gray-600 hidden sm:block">Unity IL2CPP File Dumper & Decompiler</p>
+                    </div>
+                    <span class="ml-3 px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full" aria-label="Beta version">
+                        BETA
+                    </span>
+                </div>
+                <nav class="flex items-center space-x-4" role="navigation" aria-label="Main navigation">
+                    <button id="refresh-btn" class="bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-md text-sm font-medium text-gray-700 transition-colors" aria-label="Refresh system status">
+                        <i class="fas fa-refresh mr-1" aria-hidden="true"></i> Refresh
+                    </button>
+                    <button id="clear-cache-btn" class="bg-red-100 hover:bg-red-200 px-3 py-2 rounded-md text-sm font-medium text-red-700 transition-colors" aria-label="Clear server cache">
+                        <i class="fas fa-trash mr-1" aria-hidden="true"></i> Clear Cache
+                    </button>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" role="main">
+        <%- body %>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t mt-16" role="contentinfo">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Il2CppDumper</h3>
+                    <p class="text-gray-600 text-sm">
+                        Free online tool for dumping Unity IL2CPP binaries and extracting metadata.
+                        No installation required - works directly in your browser.
+                    </p>
+                </div>
+                <div>
+                    <h4 class="text-md font-medium text-gray-900 mb-4">Features</h4>
+                    <ul class="text-gray-600 text-sm space-y-2">
+                        <li>• IL2CPP Binary Dumping</li>
+                        <li>• Metadata Extraction</li>
+                        <li>• Unity Assembly Decompilation</li>
+                        <li>• Real-time Progress Tracking</li>
+                        <li>• Secure File Processing</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="text-md font-medium text-gray-900 mb-4">Resources</h4>
+                    <ul class="text-gray-600 text-sm space-y-2">
+                        <li><a href="https://github.com/springmusk026/Il2CppDumperWeb" class="hover:text-blue-600" target="_blank" rel="noopener noreferrer">Original Il2CppDumper</a></li>
+                        <li><a href="/api/health" class="hover:text-blue-600">API Status</a></li>
+                        <li><a href="/sitemap.xml" class="hover:text-blue-600">Sitemap</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t mt-8 pt-8 text-center text-gray-500 text-sm">
+                <p>&copy; 2024 Il2CppDumper. Built for Unity game developers and reverse engineers.</p>
+                <p class="mt-2">
+                    <span class="inline-flex items-center">
+                        <i class="fas fa-shield-alt mr-1" aria-hidden="true"></i>
+                        Secure • Free • No Installation Required
+                    </span>
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Modals -->
+    <%- modals %>
+
+    <!-- Scripts -->
+    <%- scripts %>
+</body>
+</html>

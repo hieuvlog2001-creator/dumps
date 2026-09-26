@@ -1,0 +1,1088 @@
+<script>
+    /**
+     * Il2CppDumper Client-Side Scripts
+     * Handles frontend functionality for the Il2CppDumper web interface
+     * @module client-scripts
+     */
+
+    /** @type {string|null} Cloudflare Turnstile token */
+    let turnstileToken = null;
+
+    /**
+     * Cloudflare Turnstile verification success callback
+     * @param {string} token - The verification token from Turnstile
+     */
+    function turnstileCallback(token) {
+        turnstileToken = token;
+        console.log('Turnstile verification successful');
+    }
+
+    /**
+     * Cloudflare Turnstile error callback
+     * @param {Object} error - Error object from Turnstile
+     */
+    function turnstileErrorCallback(error) {
+        console.error('Turnstile error:', error);
+        turnstileToken = null;
+    }
+
+    /**
+     * Main client class for Il2CppDumper web interface
+     * Handles file uploads, job submission, progress tracking, and UI updates
+     */
+    class Il2CppDumperClient {
+        /**
+         * Create a new Il2CppDumperClient instance
+         */
+        constructor() {
+            /** @type {string|null} Current active job ID */
+            this.currentJobId = null;
+            /** @type {EventSource|null} Server-sent events connection */
+            this.eventSource = null;
+            /** @type {number} Offset for job history pagination */
+            this.jobOffset = 0;
+            /** @type {Object} Resumable upload instances */
+            this.resumableUploads = {};
+            this.init();
+        }
+
+        /**
+         * Ensure Turnstile token is available before API calls
+         * @async
+         * @returns {Promise<boolean>} True if token is available or obtained
+         */
+        async ensureTurnstileToken() {
+            if (turnstileToken) {
+                return true;
+            }
+
+            // Execute invisible Turnstile challenge
+            if (window.turnstile) {
+                window.turnstile.execute();
+                // Wait for the challenge to complete
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                return !!turnstileToken;
+            }
+
+            return false;
+        }
+
+        /**
+         * Make authenticated API request with Turnstile token
+         * @async
+         * @param {string} url - API endpoint URL
+         * @param {Object} options - Fetch options
+         * @returns {Promise<Response>} Fetch response
+         */
+        async authenticatedFetch(url, options = {}) {
+            const hasToken = await this.ensureTurnstileToken();
+            if (!hasToken) {
+                throw new Error('Security verification failed');
+            }
+
+            const headers = {
+                'x-turnstile-token': turnstileToken,
+                ...options.headers
+            };
+
+            return fetch(url, {
+                ...options,
+                headers
+            });
+        }
+
+        /**
+         * Initialize resumable upload for a file input
+         * @param {string} fieldName - Field name (soFile or metaFile)
+         * @param {HTMLInputElement} inputElement - File input element
+         */
+        initResumableUpload(fieldName, inputElement) {
+            if (this.resumableUploads[fieldName]) {
+                this.resumableUploads[fieldName].destroy();
+            }
+
+            this.resumableUploads[fieldName] = new Resumable({
+                target: '/api/upload/chunk',
+                chunkSize: 10 * 1024 * 1024, // Increased to 10MB chunks (fewer requests)
+                simultaneousUploads: 1,  // Single upload to avoid rate limiting
+                testChunks: false,  // Disable GET requests for chunk testing
+                throttleProgressCallbacks: 1,
+                maxChunkRetries: 2,  // Reduced retries
+                chunkRetryInterval: 1000, // 1 second delay between retries
+                fileParameterName: 'chunk',
+                query: {
+                    fieldName: fieldName
+                }
+            });
+
+            // Let resumable.js handle file selection and drag & drop
+            this.resumableUploads[fieldName].assignBrowse(inputElement);
+            this.resumableUploads[fieldName].assignDrop(document.querySelector(`[data-file-type="${fieldName}"]`));
+
+            this.setupResumableEvents(fieldName);
+        }
+
+        /**
+         * Setup event handlers for resumable upload
+         * @param {string} fieldName - Field name
+         */
+        setupResumableEvents(fieldName) {
+            const resumable = this.resumableUploads[fieldName];
+
+            resumable.on('fileAdded', (file) => {
+                console.log(`File added via resumable: ${file.fileName} (${file.size} bytes)`);
+                this.showUploadProgress();
+                this.updateFileInfo(fieldName, file.fileName);
+                console.log(`Starting upload for ${fieldName}...`);
+                // Start upload immediately when file is added
+                resumable.upload();
+            });
+
+            resumable.on('fileProgress', (file) => {
+                const progress = Math.floor(file.progress() * 100);
+                console.log(`${fieldName} progress: ${progress}%`);
+                this.updateUploadProgress(fieldName, progress);
+            });
+
+            resumable.on('fileSuccess', (file, response) => {
+                console.log(`Upload completed: ${file.fileName}`);
+                try {
+                    const responseData = JSON.parse(response);
+                    this.handleUploadSuccess(fieldName, responseData);
+                } catch (e) {
+                    console.error('Failed to parse upload response:', e);
+                    this.showError(`Upload response parsing failed for ${file.fileName}`);
+                }
+            });
+
+            resumable.on('fileError', (file, response) => {
+                console.error(`Upload failed: ${file.fileName}`, response);
+                this.showError(`Upload failed for ${file.fileName}: ${response}`);
+            });
+
+            resumable.on('uploadStart', () => {
+                console.log(`Upload started for ${fieldName}`);
+                this.showUploadProgress();
+            });
+
+            resumable.on('progress', () => {
+                const overallProgress = Math.floor(resumable.progress() * 100);
+                console.log(`${fieldName} overall progress: ${overallProgress}%`);
+                this.updateUploadProgress(fieldName, overallProgress);
+            });
+
+            resumable.on('chunkingStart', (file) => {
+                console.log(`Chunking started for ${fieldName}: ${file.fileName}`);
+            });
+
+            resumable.on('chunkingProgress', (file, ratio) => {
+                console.log(`${fieldName} chunking progress: ${Math.floor(ratio * 100)}%`);
+            });
+
+            resumable.on('chunkingComplete', (file) => {
+                console.log(`Chunking completed for ${fieldName}: ${file.fileName}`);
+            });
+
+            resumable.on('complete', () => {
+                console.log(`All uploads completed for ${fieldName}`);
+                this.updateUploadProgress(fieldName, 100);
+            });
+        }
+
+        /**
+         * Show upload progress UI
+         */
+        showUploadProgress() {
+            document.getElementById('upload-progress').classList.remove('hidden');
+        }
+
+        /**
+         * Update upload progress for specific field
+         * @param {string} fieldName - Field name
+         * @param {number} progress - Progress percentage
+         */
+        updateUploadProgress(fieldName, progress) {
+            // Map field names to HTML element IDs
+            const idMap = {
+                'soFile': 'so',
+                'metaFile': 'meta'
+            };
+
+            const prefix = idMap[fieldName] || fieldName;
+            const progressElement = document.getElementById(`${prefix}-progress`);
+            const progressBar = document.getElementById(`${prefix}-progress-bar`);
+
+            if (progressElement && progressBar) {
+                progressElement.textContent = `${progress}%`;
+                progressBar.style.width = `${progress}%`;
+                console.log(`UI Progress updated: ${fieldName} - ${progress}%`);
+            } else {
+                console.warn(`Progress elements not found for ${fieldName} (looked for ${prefix}-progress and ${prefix}-progress-bar)`);
+            }
+        }
+
+        /**
+         * Hide upload area for a specific field after successful upload
+         * @param {string} fieldName - Field name
+         */
+        hideUploadArea(fieldName) {
+            const dropZone = document.querySelector(`[data-file-type="${fieldName}"]`);
+            const fileInfo = dropZone?.nextElementSibling;
+
+            if (dropZone) {
+                dropZone.style.display = 'none';
+                dropZone.classList.add('uploaded');
+
+                // Add success indicator
+                const successDiv = document.createElement('div');
+                successDiv.className = 'flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-lg';
+                successDiv.innerHTML = `
+                    <div class="flex items-center">
+                        <i class="fas fa-check-circle text-green-500 mr-2"></i>
+                        <span class="text-green-700 font-medium">File uploaded successfully</span>
+                    </div>
+                    <button type="button" class="remove-uploaded-file text-red-600 hover:text-red-800 text-sm" data-field="${fieldName}">
+                        <i class="fas fa-times"></i> Change file
+                    </button>
+                `;
+
+                dropZone.parentNode.insertBefore(successDiv, dropZone);
+            }
+
+            if (fileInfo) {
+                fileInfo.style.display = 'none';
+            }
+        }
+
+        /**
+         * Reset upload area for a specific field (allow re-uploading)
+         * @param {string} fieldName - Field name
+         */
+        resetUploadArea(fieldName) {
+            const dropZone = document.querySelector(`[data-file-type="${fieldName}"]`);
+            const fileInfo = dropZone?.nextElementSibling;
+            const successIndicator = dropZone?.previousElementSibling;
+
+            // Remove success indicator if it exists
+            if (successIndicator && successIndicator.classList.contains('bg-green-50')) {
+                successIndicator.remove();
+            }
+
+            // Show upload area again
+            if (dropZone) {
+                dropZone.style.display = 'block';
+                dropZone.classList.remove('uploaded');
+            }
+
+            if (fileInfo) {
+                fileInfo.style.display = 'none';
+            }
+
+            // Clear uploaded file data
+            if (this.uploadedFiles && this.uploadedFiles[fieldName]) {
+                delete this.uploadedFiles[fieldName];
+            }
+
+            // Reset progress
+            this.updateUploadProgress(fieldName, 0);
+
+            // Update submit button
+            this.updateSubmitButton();
+        }
+
+        /**
+         * Update file information display
+         * @param {string} fieldName - Field name (soFile or metaFile)
+         * @param {string} fileName - File name
+         */
+        updateFileInfo(fieldName, fileName) {
+            const fileInfo = document.querySelector(`[data-file-type="${fieldName}"]`).nextElementSibling;
+            const fileNameElement = fileInfo?.querySelector('.file-name');
+
+            if (fileNameElement) {
+                // Get file size if available from uploaded files or traditional input
+                let sizeText = '';
+                if (this.uploadedFiles?.[fieldName]) {
+                    // For chunked uploads, we don't have size info easily available
+                    sizeText = ' (uploaded)';
+                } else {
+                    const fileInput = document.querySelector(`input[name="${fieldName}"]`);
+                    const file = fileInput?.files[0];
+                    sizeText = file ? ` (${this.formatFileSize(file.size)})` : '';
+                }
+
+                fileNameElement.textContent = `${fileName}${sizeText}`;
+                if (fileInfo) fileInfo.classList.remove('hidden');
+            }
+        }
+
+        /**
+         * Handle successful upload
+         * @param {string} fieldName - Field name
+         * @param {Object} responseData - Response data
+         */
+        handleUploadSuccess(fieldName, responseData) {
+            console.log(`Upload success for ${fieldName}:`, responseData);
+
+            // Store the uploaded file info for job submission
+            this.uploadedFiles = this.uploadedFiles || {};
+            this.uploadedFiles[fieldName] = {
+                uploadId: responseData.uploadId,
+                fileName: responseData.fileName,
+                filePath: responseData.filePath
+            };
+
+            // Update progress to 100%
+            this.updateUploadProgress(fieldName, 100);
+
+            // Hide the upload area for this field
+            this.hideUploadArea(fieldName);
+
+            // Note: Validation was already done via /api/validate, so we don't need to show it again
+            this.updateSubmitButton();
+        }
+
+        /**
+         * Initialize the client application
+         */
+        init() {
+            this.setupEventListeners();
+            this.setupResumableUploads();
+            this.loadSystemInfo();
+            this.loadJobHistory();
+            this.startStatusUpdates();
+        }
+
+        /**
+         * Setup resumable uploads for large files
+         */
+        setupResumableUploads() {
+            // Setup for SO file
+            const soFileInput = document.querySelector('input[name="soFile"]');
+            if (soFileInput) {
+                this.initResumableUpload('soFile', soFileInput);
+            }
+
+            // Setup for metadata file
+            const metaFileInput = document.querySelector('input[name="metaFile"]');
+            if (metaFileInput) {
+                this.initResumableUpload('metaFile', metaFileInput);
+            }
+        }
+
+        /**
+         * Validate both uploaded files before submission using backend API
+         * @async
+         */
+        async validateUploadedFiles() {
+            if (!this.uploadedFiles?.soFile || !this.uploadedFiles?.metaFile) {
+                console.warn('No uploaded files to validate');
+                return;
+            }
+
+            try {
+                const response = await this.authenticatedFetch('/api/validate/uploaded', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        soFilePath: this.uploadedFiles.soFile.filePath,
+                        metaFilePath: this.uploadedFiles.metaFile.filePath
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success && result.valid) {
+                    console.log('Backend validation passed:', result.validation);
+                    // Show validation results in UI
+                    this.showValidationResult(result.validation.soFile, 'soFile');
+                    this.showValidationResult(result.validation.metaFile, 'metaFile');
+                } else {
+                    console.error('Backend validation failed:', result);
+                    this.showError('File validation failed. Please check file formats.');
+                }
+            } catch (error) {
+                console.error('Backend validation error:', error);
+                this.showError('Failed to validate uploaded files');
+            }
+        }
+
+        /**
+         * Set up all DOM event listeners
+         */
+        setupEventListeners() {
+            // File upload handling
+            document.querySelectorAll('.file-drop-zone').forEach(zone => {
+                const input = zone.querySelector('input[type="file"]');
+                const fileType = zone.dataset.fileType;
+
+                zone.addEventListener('click', () => input.click());
+                zone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    zone.classList.add('dragover');
+                });
+                zone.addEventListener('dragleave', () => {
+                    zone.classList.remove('dragover');
+                });
+                zone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    zone.classList.remove('dragover');
+                    if (e.dataTransfer.files.length > 0) {
+                        input.files = e.dataTransfer.files;
+                        this.handleFileSelect(input, fileType);
+                    }
+                });
+
+                input.addEventListener('change', () => {
+                    this.handleFileSelect(input, fileType);
+                });
+            });
+
+            // Form submission
+            document.getElementById('upload-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.submitJob();
+            });
+
+            // Button handlers
+            document.getElementById('refresh-btn').addEventListener('click', () => {
+                this.loadSystemInfo();
+                this.loadJobHistory();
+            });
+
+            document.getElementById('clear-cache-btn').addEventListener('click', () => {
+                this.clearCache();
+            });
+
+            document.getElementById('toggle-log').addEventListener('click', () => {
+                const logOutput = document.getElementById('log-output');
+                logOutput.classList.toggle('hidden');
+            });
+
+            document.getElementById('load-more-jobs').addEventListener('click', () => {
+                this.loadMoreJobs();
+            });
+
+            // Modal handlers
+            document.getElementById('close-modal').addEventListener('click', () => {
+                this.hideModal('success-modal');
+            });
+
+            document.getElementById('close-error-modal').addEventListener('click', () => {
+                this.hideModal('error-modal');
+            });
+
+            // Remove file handlers
+            document.querySelectorAll('.remove-file').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const fileInfo = e.target.closest('.file-info');
+                    const dropZone = fileInfo.previousElementSibling;
+                    const fieldName = dropZone?.dataset.fileType;
+
+                    if (fieldName) {
+                        // Reset the entire upload area
+                        this.resetUploadArea(fieldName);
+                    } else {
+                        // Fallback for traditional file input
+                        const input = dropZone.querySelector('input[type="file"]');
+                        if (input) input.value = '';
+                        if (fileInfo) fileInfo.classList.add('hidden');
+                        this.updateSubmitButton();
+                    }
+                });
+            });
+
+            // Remove uploaded file handlers (for success indicators)
+            document.addEventListener('click', (e) => {
+                if (e.target.classList.contains('remove-uploaded-file') || e.target.closest('.remove-uploaded-file')) {
+                    const fieldName = e.target.dataset.field || e.target.closest('.remove-uploaded-file').dataset.field;
+                    if (fieldName) {
+                        this.resetUploadArea(fieldName);
+                    }
+                }
+            });
+        }
+
+        /**
+         * Handle file selection from input or drag & drop
+         * Note: This is kept for compatibility but resumable.js handles most file operations
+         * @param {HTMLInputElement} input - File input element
+         * @param {string} fileType - Type of file (soFile or metaFile)
+         */
+        async handleFileSelect(input, fileType) {
+            const file = input.files[0];
+            if (!file) return;
+
+            console.log(`File selected: ${file.name} (${file.size} bytes)`);
+
+            // Keep validation for user feedback, but optimize it
+            await this.validateFile(file, fileType);
+
+            // Note: Resumable.js will handle the actual upload
+            // We don't need to manually trigger it here
+        }
+
+        /**
+         * Validate a file by sending it to the server
+         * @async
+         * @param {File} file - File to validate
+         * @param {string} fileType - Type of file being validated
+         */
+        async validateFile(file, fileType) {
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                // Add Turnstile token for validation requests
+                if (turnstileToken) {
+                    formData.append('cf-turnstile-response', turnstileToken);
+                }
+
+                const response = await this.authenticatedFetch('/api/validate', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                this.showValidationResult(result.validation, fileType);
+            } catch (error) {
+                console.error('Validation error:', error);
+            }
+        }
+
+        /**
+         * Display file validation results in the UI
+         * @param {Object} validation - Validation result object
+         * @param {string} fileType - Type of file validated
+         */
+        showValidationResult(validation, fileType) {
+            const resultsDiv = document.getElementById('validation-results');
+            const contentDiv = document.getElementById('validation-content');
+
+            resultsDiv.classList.remove('hidden');
+
+            const resultHtml = `
+                <div class="p-3 rounded-lg ${validation.valid ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}">
+                    <div class="flex items-center">
+                        <i class="fas ${validation.valid ? 'fa-check-circle text-green-500' : 'fa-exclamation-circle text-red-500'} mr-2"></i>
+                        <span class="font-medium">${fileType}: ${validation.filename}</span>
+                    </div>
+                    <div class="mt-2 text-sm text-gray-600">
+                        <p>Type: ${validation.type} | Size: ${this.formatFileSize(validation.size)}</p>
+                        ${validation.valid ? '<p class="text-green-600">✓ Valid file format</p>' : '<p class="text-red-600">✗ Invalid file format</p>'}
+                        ${validation.details && Object.keys(validation.details).length > 0 ?
+                    `<div class="mt-1 text-xs">${Object.entries(validation.details).map(([k, v]) => `${k}: ${v}`).join(' | ')}</div>` : ''
+                }
+                    </div>
+                </div>
+            `;
+
+            const existingResult = contentDiv.querySelector(`[data-file-type="${fileType}"]`);
+            if (existingResult) {
+                existingResult.outerHTML = `<div data-file-type="${fileType}">${resultHtml}</div>`;
+            } else {
+                contentDiv.innerHTML += `<div data-file-type="${fileType}">${resultHtml}</div>`;
+            }
+        }
+
+        /**
+         * Update the submit button state based on form completion
+         */
+        updateSubmitButton() {
+            const soFile = document.querySelector('input[name="soFile"]').files[0];
+            const metaFile = document.querySelector('input[name="metaFile"]').files[0];
+            const submitBtn = document.getElementById('submit-btn');
+
+            // Check if files are uploaded via chunked upload
+            const soUploaded = this.uploadedFiles && this.uploadedFiles.soFile;
+            const metaUploaded = this.uploadedFiles && this.uploadedFiles.metaFile;
+
+            // Check if files are selected in traditional inputs
+            const soSelected = soFile && soFile.size > 0;
+            const metaSelected = metaFile && metaFile.size > 0;
+
+            // Enable button if:
+            // 1. Both files uploaded via chunks, OR
+            // 2. Both files selected traditionally, OR
+            // 3. Mixed: one chunked + one traditional
+            const canSubmitResult = (soUploaded || soSelected) && (metaUploaded || metaSelected);
+            const canSubmit = canSubmitResult; // Ensure it's a boolean
+
+            submitBtn.disabled = !canSubmit || this.currentJobId;
+
+            console.log('Submit button state:', {
+                soUploaded: !!soUploaded,
+                metaUploaded: !!metaUploaded,
+                soSelected: !!soSelected,
+                metaSelected: !!metaSelected,
+                canSubmit: !!canSubmitResult,
+                disabled: submitBtn.disabled
+            });
+        }
+
+        /**
+         * Submit a new Il2Cpp dump job
+         * @async
+         */
+        async submitJob() {
+            try {
+                // For invisible mode, execute Turnstile challenge if not already done
+                if (!turnstileToken) {
+                    // Execute invisible Turnstile challenge
+                    if (window.turnstile) {
+                        window.turnstile.execute();
+                        // Wait a bit for the challenge to complete
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+
+                    if (!turnstileToken) {
+                        this.showError('Security verification in progress. Please wait...');
+                        return;
+                    }
+                }
+
+                // Validate uploaded files before submission
+                await this.validateUploadedFiles();
+
+                const formData = new FormData();
+                const soFile = document.querySelector('input[name="soFile"]').files[0];
+                const metaFile = document.querySelector('input[name="metaFile"]').files[0];
+
+                // Handle SO file
+                if (this.uploadedFiles?.soFile) {
+                    formData.append('soFilePath', this.uploadedFiles.soFile.filePath);
+                    formData.append('soFileName', this.uploadedFiles.soFile.fileName);
+                    // Try to get file size from the uploaded file info
+                    if (this.uploadedFiles.soFile.size) {
+                        formData.append('soFileSize', this.uploadedFiles.soFile.size);
+                    }
+                } else if (soFile) {
+                    formData.append('soFile', soFile);
+                    formData.append('soFileSize', soFile.size);
+                } else {
+                    this.showError('Please upload or select an SO file');
+                    return;
+                }
+
+                // Handle metadata file
+                if (this.uploadedFiles?.metaFile) {
+                    formData.append('metaFilePath', this.uploadedFiles.metaFile.filePath);
+                    formData.append('metaFileName', this.uploadedFiles.metaFile.fileName);
+                    // Try to get file size from the uploaded file info
+                    if (this.uploadedFiles.metaFile.size) {
+                        formData.append('metaFileSize', this.uploadedFiles.metaFile.size);
+                    }
+                } else if (metaFile) {
+                    formData.append('metaFile', metaFile);
+                    formData.append('metaFileSize', metaFile.size);
+                } else {
+                    this.showError('Please upload or select a metadata file');
+                    return;
+                }
+
+                formData.append('cf-turnstile-response', turnstileToken);
+
+                const response = await fetch('/api/dump', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    this.currentJobId = result.jobId;
+                    this.startJobProgress(result.jobId);
+                    this.showJobProgress();
+                    // Reset Turnstile for next submission
+                    turnstileToken = null;
+                    if (window.turnstile) {
+                        window.turnstile.reset();
+                    }
+                } else {
+                    this.showError(result.error);
+                }
+            } catch (error) {
+                this.showError('Failed to submit job: ' + error.message);
+            }
+        }
+
+        /**
+         * Start listening for job progress updates via SSE
+         * @param {string} jobId - Job ID to monitor
+         */
+        startJobProgress(jobId) {
+            if (this.eventSource) {
+                this.eventSource.close();
+            }
+
+            this.eventSource = new EventSource(`/api/jobs/${jobId}/progress`);
+
+            this.eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                this.updateJobProgress(data);
+            };
+
+            this.eventSource.onerror = (error) => {
+                console.error('SSE error:', error);
+                if (this.eventSource.readyState === EventSource.CLOSED) {
+                    setTimeout(() => this.startJobProgress(jobId), 5000);
+                }
+            };
+        }
+
+        /**
+         * Update job progress display with new data
+         * @param {Object} data - Progress data from server
+         */
+        updateJobProgress(data) {
+            const progressBar = document.getElementById('progress-bar');
+            const progressPercent = document.getElementById('progress-percent');
+            const progressLabel = document.getElementById('progress-label');
+            const logContent = document.getElementById('log-content');
+
+            if (data.progress !== undefined) {
+                progressBar.style.width = `${data.progress}%`;
+                progressPercent.textContent = `${Math.round(data.progress)}%`;
+            }
+
+            if (data.message) {
+                progressLabel.textContent = data.message;
+            }
+
+            if (data.type === 'output' && data.data) {
+                logContent.innerHTML += `<div>${this.escapeHtml(data.data)}</div>`;
+                logContent.scrollTop = logContent.scrollHeight;
+            }
+
+            if (data.status === 'completed') {
+                this.handleJobComplete(data);
+            } else if (data.status === 'failed') {
+                this.handleJobFailed(data);
+            }
+        }
+
+        /**
+         * Handle job completion
+         * @param {Object} data - Completion data from server
+         */
+        handleJobComplete(data) {
+            this.hideJobProgress();
+            this.currentJobId = null;
+
+            if (data.downloadUrl) {
+                document.getElementById('download-link').href = data.downloadUrl;
+                this.showModal('success-modal');
+            }
+
+            this.loadJobHistory();
+            this.resetForm();
+        }
+
+        /**
+         * Handle job failure
+         * @param {Object} data - Failure data from server
+         */
+        handleJobFailed(data) {
+            this.hideJobProgress();
+            this.currentJobId = null;
+            this.showError(data.error || 'Job failed');
+            this.loadJobHistory();
+            this.resetForm();
+        }
+
+        /**
+         * Show the job progress UI
+         */
+        showJobProgress() {
+            document.getElementById('job-progress').classList.remove('hidden');
+            document.getElementById('submit-btn').disabled = true;
+        }
+
+        /**
+         * Hide the job progress UI
+         */
+        hideJobProgress() {
+            document.getElementById('job-progress').classList.add('hidden');
+            document.getElementById('submit-btn').disabled = false;
+            if (this.eventSource) {
+                this.eventSource.close();
+                this.eventSource = null;
+            }
+        }
+
+        /**
+         * Reset the upload form to initial state
+         */
+        resetForm() {
+            document.getElementById('upload-form').reset();
+            document.querySelectorAll('.file-info').forEach(info => {
+                info.classList.add('hidden');
+            });
+            document.getElementById('validation-results').classList.add('hidden');
+            this.updateSubmitButton();
+        }
+
+        /**
+         * Load system information and metrics
+         * @async
+         */
+        async loadSystemInfo() {
+            try {
+                const [healthResponse, metricsResponse] = await Promise.all([
+                    fetch('/api/health'),
+                    fetch('/api/metrics')
+                ]);
+
+                const health = await healthResponse.json();
+                const metrics = await metricsResponse.json();
+
+                // Update status indicators
+                document.getElementById('server-status').textContent = health.status === 'healthy' ? 'Online' : 'Offline';
+                document.getElementById('active-jobs').textContent = health.jobs?.active || 0;
+                document.getElementById('cache-entries').textContent = health.cache?.entries || 0;
+
+                // Update system info
+                if (health.system) {
+                    document.getElementById('server-uptime').textContent = this.formatUptime(health.system.uptime);
+                    document.getElementById('memory-usage').textContent =
+                        `${metrics.success ? Math.round(metrics.metrics.system.memory.used) : '?'}MB`;
+                }
+            } catch (error) {
+                console.error('Failed to load system info:', error);
+                document.getElementById('server-status').textContent = 'Error';
+            }
+        }
+
+        /**
+         * Load job history from the server
+         * @async
+         */
+        async loadJobHistory() {
+            try {
+                const response = await fetch(`/api/jobs?limit=10&offset=${this.jobOffset}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    const historyDiv = document.getElementById('job-history');
+
+                    if (this.jobOffset === 0) {
+                        historyDiv.innerHTML = '';
+                    }
+
+                    if (result.jobs.length === 0 && this.jobOffset === 0) {
+                        historyDiv.innerHTML = `
+                            <div class="text-center text-gray-500 py-8">
+                                <i class="fas fa-clock text-2xl mb-2"></i>
+                                <p class="text-sm">No recent jobs</p>
+                            </div>
+                        `;
+                    } else {
+                        result.jobs.forEach(job => {
+                            historyDiv.appendChild(this.createJobCard(job));
+                        });
+                    }
+
+                    const loadMoreBtn = document.getElementById('load-more-jobs');
+                    if (result.jobs.length === 10 && result.total > this.jobOffset + 10) {
+                        loadMoreBtn.classList.remove('hidden');
+                    } else {
+                        loadMoreBtn.classList.add('hidden');
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load job history:', error);
+            }
+        }
+
+        /**
+         * Load more jobs for pagination
+         */
+        loadMoreJobs() {
+            this.jobOffset += 10;
+            this.loadJobHistory();
+        }
+
+        /**
+         * Create a job card element for the history list
+         * @param {Object} job - Job data object
+         * @returns {HTMLElement} Job card element
+         */
+        createJobCard(job) {
+            const card = document.createElement('div');
+            card.className = 'job-card border rounded-lg p-4 hover:shadow-md transition-shadow';
+
+            const statusColors = {
+                'completed': 'bg-green-100 text-green-800',
+                'failed': 'bg-red-100 text-red-800',
+                'processing': 'bg-blue-100 text-blue-800',
+                'queued': 'bg-yellow-100 text-yellow-800',
+                'cancelled': 'bg-gray-100 text-gray-800'
+            };
+
+            const canCancel = job.status === 'queued';
+            const actionsHtml = job.downloadUrl
+                ? `<a href="${job.downloadUrl}" class="text-blue-600 hover:text-blue-800"><i class="fas fa-download"></i></a>`
+                : canCancel
+                ? `<button onclick="window.il2cppClient.cancelJob('${job.id}')" class="text-red-600 hover:text-red-800"><i class="fas fa-times"></i></button>`
+                : '';
+
+            card.innerHTML = `
+                <div class="flex justify-between items-start mb-2">
+                    <span class="text-xs font-mono text-gray-500">${job.id.substring(0, 8)}</span>
+                    <span class="px-2 py-1 text-xs font-medium rounded-full ${statusColors[job.status] || 'bg-gray-100 text-gray-800'}">
+                        ${job.status}
+                    </span>
+                </div>
+                <div class="text-sm text-gray-600 mb-2">
+                    <div class="truncate">${job.files?.soFile || 'SO File'}</div>
+                    <div class="truncate">${job.files?.metaFile || 'Metadata File'}</div>
+                </div>
+                <div class="flex justify-between items-center text-xs text-gray-500">
+                    <span>${new Date(job.createdAt).toLocaleString()}</span>
+                    <div class="flex space-x-2">
+                        ${actionsHtml}
+                    </div>
+                </div>
+            `;
+
+            return card;
+        }
+
+        /**
+         * Cancel a queued job
+         * @async
+         * @param {string} jobId - Job ID to cancel
+         */
+        async cancelJob(jobId) {
+            if (!confirm('Are you sure you want to cancel this job?')) {
+                return;
+            }
+
+            try {
+                const response = await this.authenticatedFetch(`/api/jobs/${jobId}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('Job cancelled successfully');
+                    this.loadJobHistory();
+                } else {
+                    this.showError(result.error);
+                }
+            } catch (error) {
+                this.showError('Failed to cancel job: ' + error.message);
+            }
+        }
+
+        /**
+         * Clear the server cache
+         * @async
+         */
+        async clearCache() {
+            if (!confirm('Are you sure you want to clear the cache? This will delete all cached dump results.')) {
+                return;
+            }
+
+            try {
+                const response = await this.authenticatedFetch('/api/cache', {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(result.message);
+                    this.loadSystemInfo();
+                } else {
+                    this.showError(result.error);
+                }
+            } catch (error) {
+                this.showError('Failed to clear cache: ' + error.message);
+            }
+        }
+
+        /**
+         * Start periodic status updates
+         */
+        startStatusUpdates() {
+            setInterval(() => {
+                this.loadSystemInfo();
+            }, 30000);
+        }
+
+        /**
+         * Show a modal dialog
+         * @param {string} modalId - ID of the modal element
+         */
+        showModal(modalId) {
+            document.getElementById(modalId).classList.remove('hidden');
+            document.getElementById(modalId).classList.add('flex');
+        }
+
+        /**
+         * Hide a modal dialog
+         * @param {string} modalId - ID of the modal element
+         */
+        hideModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+            document.getElementById(modalId).classList.remove('flex');
+        }
+
+        /**
+         * Show an error message in a modal
+         * @param {string} message - Error message to display
+         */
+        showError(message) {
+            document.getElementById('error-message').textContent = message;
+            this.showModal('error-modal');
+        }
+
+        /**
+         * Format file size in human-readable format
+         * @param {number} bytes - File size in bytes
+         * @returns {string} Formatted file size
+         */
+        formatFileSize(bytes) {
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            if (bytes === 0) return '0 B';
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        /**
+         * Format uptime in human-readable format
+         * @param {number} seconds - Uptime in seconds
+         * @returns {string} Formatted uptime string
+         */
+        formatUptime(seconds) {
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+
+            if (days > 0) return `${days}d ${hours}h`;
+            if (hours > 0) return `${hours}h ${minutes}m`;
+            return `${minutes}m`;
+        }
+
+        /**
+         * Escape HTML characters to prevent XSS
+         * @param {string} text - Text to escape
+         * @returns {string} Escaped HTML string
+         */
+        escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    }
+
+    // Initialize the client when the page loads
+    document.addEventListener('DOMContentLoaded', () => {
+        window.il2cppClient = new Il2CppDumperClient();
+    });
+</script>
