@@ -1,30 +1,168 @@
-- name: Prepare deployment directory
-  uses: appleboy/ssh-action@v1.0.0
-  with:
-    host: ${{ secrets.VPS_HOST }}
-    username: ${{ secrets.VPS_USER }}
-    password: ${{ secrets.VPS_PASSWORD }}
-    port: ${{ secrets.VPS_SSH_PORT }}
-    timeout: 30s
-    command_timeout: 10m
-    script: |
-      set -e
+name: Deploy to VPS
 
-      echo "================================"
-      echo "SSH CONNECTION SUCCESS"
-      echo "================================"
+on:
+  push:
+    branches:
+      - main
 
-      echo "User:"
-      whoami
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
 
-      echo "Hostname:"
-      hostname
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      APP_DIR="/opt/il2cpp-dumper-server"
+      # ========================================
+      # 1. TEST SSH + PREPARE VPS
+      # ========================================
+      - name: Prepare deployment directory
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          timeout: 30s
+          command_timeout: 10m
+          script: |
+            set -e
 
-      echo "Preparing deployment directory..."
+            echo "================================"
+            echo "SSH CONNECTION SUCCESS"
+            echo "================================"
 
-      mkdir -p "$APP_DIR"
-      rm -rf "$APP_DIR"/*
+            echo "User:"
+            whoami
 
-      echo "Deployment directory ready!"
+            echo "UID:"
+            id
+
+            echo "Hostname:"
+            hostname
+
+            echo "================================"
+            echo "Preparing deployment directory"
+            echo "================================"
+
+            APP_DIR="/opt/il2cpp-dumper-server"
+
+            sudo mkdir -p "$APP_DIR"
+
+            sudo chown -R "$(whoami):$(whoami)" "$APP_DIR"
+
+            sudo chmod 755 "$APP_DIR"
+
+            echo "Directory permissions:"
+            ls -ld "$APP_DIR"
+
+            echo "Deployment directory ready!"
+
+      # ========================================
+      # 2. COPY FILES
+      # ========================================
+      - name: Copy files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          source: "."
+          target: "/opt/il2cpp-dumper-server"
+          rm: true
+          timeout: 30s
+
+      # ========================================
+      # 3. BUILD + RUN
+      # ========================================
+      - name: Setup and run application
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          timeout: 30s
+          command_timeout: 30m
+          script: |
+            set -e
+
+            APP_DIR="/opt/il2cpp-dumper-server"
+
+            cd "$APP_DIR"
+
+            echo "================================"
+            echo "DEPLOYMENT DIRECTORY"
+            echo "================================"
+
+            pwd
+            ls -la
+
+            echo "================================"
+            echo "CHECKING REQUIRED FILES"
+            echo "================================"
+
+            if [ ! -f "package.json" ]; then
+              echo "ERROR: package.json not found"
+              exit 1
+            fi
+
+            if [ -f "docker-compose.yml" ]; then
+              COMPOSE_FILE="docker-compose.yml"
+            elif [ -f "docker-compose.yaml" ]; then
+              COMPOSE_FILE="docker-compose.yaml"
+            else
+              echo "ERROR: docker-compose.yml not found"
+              exit 1
+            fi
+
+            echo "Using: $COMPOSE_FILE"
+
+            echo "================================"
+            echo "NODE VERSION"
+            echo "================================"
+
+            node --version || true
+            npm --version || true
+
+            echo "================================"
+            echo "DOCKER VERSION"
+            echo "================================"
+
+            docker --version
+            docker compose version
+
+            echo "================================"
+            echo "STOPPING OLD CONTAINERS"
+            echo "================================"
+
+            docker compose down --remove-orphans || true
+
+            echo "================================"
+            echo "BUILDING APPLICATION"
+            echo "================================"
+
+            docker compose build --no-cache
+
+            echo "================================"
+            echo "STARTING APPLICATION"
+            echo "================================"
+
+            docker compose up -d
+
+            echo "================================"
+            echo "CONTAINER STATUS"
+            echo "================================"
+
+            docker compose ps
+
+            echo "================================"
+            echo "DOCKER PS"
+            echo "================================"
+
+            docker ps
+
+            echo "================================"
+            echo "DEPLOYMENT COMPLETED"
+            echo "================================"
