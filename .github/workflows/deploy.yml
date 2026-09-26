@@ -21,50 +21,64 @@ jobs:
       # ========================================
       # 2. PREPARE VPS
       # ========================================
-      - name: Prepare VPS
+      - name: Prepare deployment directory
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: ${{ secrets.VPS_SSH_PORT }}
+
           timeout: 30s
           command_timeout: 10m
 
           script: |
             set -e
 
-            echo "================================"
-            echo "SSH CONNECTION"
-            echo "================================"
-
-            whoami
-            id
-            hostname
-
             APP_DIR="/opt/il2cpp-dumper-server"
 
             echo "================================"
-            echo "PREPARING DIRECTORY"
+            echo "SSH CONNECTION SUCCESS"
             echo "================================"
 
-            # Tạo thư mục bằng root
+            echo "User:"
+            whoami
+
+            echo "UID:"
+            id
+
+            echo "Hostname:"
+            hostname
+
+            echo "================================"
+            echo "PREPARING DEPLOYMENT DIRECTORY"
+            echo "================================"
+
+            # Tạo thư mục nếu chưa tồn tại
             sudo mkdir -p "$APP_DIR"
 
-            # Xóa toàn bộ nội dung cũ
-            sudo find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-
-            # Cho user hiện tại sở hữu thư mục
+            # Đảm bảo user deploy có quyền
             sudo chown -R "$(whoami):$(whoami)" "$APP_DIR"
 
             sudo chmod 755 "$APP_DIR"
 
-            echo "Directory:"
+            echo "Current permissions:"
             ls -ld "$APP_DIR"
+
+            echo "================================"
+            echo "CLEANING OLD FILES"
+            echo "================================"
+
+            # Xóa nội dung cũ nhưng giữ lại thư mục
+            find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+            echo "Old files removed."
 
             echo "================================"
             echo "DIRECTORY READY"
             echo "================================"
+
+            ls -la "$APP_DIR"
 
 
       # ========================================
@@ -83,14 +97,15 @@ jobs:
           target: "/opt/il2cpp-dumper-server"
 
           # QUAN TRỌNG:
-          # Không cho SCP xóa target folder
+          # Không để scp-action tự rm thư mục
           rm: false
 
-          timeout: 60s
+          timeout: 30s
+          command_timeout: 10m
 
 
       # ========================================
-      # 4. BUILD + RUN
+      # 4. BUILD + RUN DOCKER
       # ========================================
       - name: Build and run application
         uses: appleboy/ssh-action@v1.0.0
@@ -99,6 +114,7 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: ${{ secrets.VPS_SSH_PORT }}
+
           timeout: 30s
           command_timeout: 30m
 
@@ -114,10 +130,15 @@ jobs:
             echo "================================"
 
             pwd
+
+            echo "================================"
+            echo "FILES"
+            echo "================================"
+
             ls -la
 
             echo "================================"
-            echo "CHECKING FILES"
+            echo "CHECKING REQUIRED FILES"
             echo "================================"
 
             if [ ! -f "package.json" ]; then
@@ -127,52 +148,112 @@ jobs:
 
             if [ -f "docker-compose.yml" ]; then
               COMPOSE_FILE="docker-compose.yml"
+
             elif [ -f "docker-compose.yaml" ]; then
               COMPOSE_FILE="docker-compose.yaml"
+
             else
-              echo "ERROR: docker-compose.yml not found"
+              echo "ERROR: docker-compose.yml or docker-compose.yaml not found"
               exit 1
             fi
 
-            echo "Using: $COMPOSE_FILE"
+            echo "Using compose file:"
+            echo "$COMPOSE_FILE"
+
+
+            # ========================================
+            # NODE
+            # ========================================
 
             echo "================================"
-            echo "NODE"
+            echo "NODE VERSION"
             echo "================================"
 
             node --version || true
             npm --version || true
 
+
+            # ========================================
+            # DOCKER
+            # ========================================
+
             echo "================================"
-            echo "DOCKER"
+            echo "DOCKER VERSION"
             echo "================================"
 
             docker --version
             docker compose version
 
-            echo "================================"
-            echo "STOP OLD CONTAINERS"
-            echo "================================"
 
-            docker compose down --remove-orphans || true
-
-            echo "================================"
-            echo "BUILD"
-            echo "================================"
-
-            docker compose build --no-cache
+            # ========================================
+            # STOP OLD CONTAINER
+            # ========================================
 
             echo "================================"
-            echo "START"
+            echo "STOPPING OLD CONTAINERS"
             echo "================================"
 
-            docker compose up -d
+            docker compose -f "$COMPOSE_FILE" down --remove-orphans || true
+
+
+            # ========================================
+            # REMOVE OLD IMAGE
+            # ========================================
 
             echo "================================"
-            echo "STATUS"
+            echo "REMOVING OLD IMAGE"
             echo "================================"
 
-            docker compose ps
+            docker compose -f "$COMPOSE_FILE" down --rmi local --remove-orphans || true
+
+
+            # ========================================
+            # BUILD
+            # ========================================
+
+            echo "================================"
+            echo "BUILDING APPLICATION"
+            echo "================================"
+
+            docker compose -f "$COMPOSE_FILE" build --no-cache
+
+
+            # ========================================
+            # START
+            # ========================================
+
+            echo "================================"
+            echo "STARTING APPLICATION"
+            echo "================================"
+
+            docker compose -f "$COMPOSE_FILE" up -d
+
+
+            # ========================================
+            # WAIT FOR CONTAINER
+            # ========================================
+
+            echo "================================"
+            echo "WAITING FOR CONTAINER"
+            echo "================================"
+
+            sleep 5
+
+
+            # ========================================
+            # COMPOSE STATUS
+            # ========================================
+
+            echo "================================"
+            echo "CONTAINER STATUS"
+            echo "================================"
+
+            docker compose -f "$COMPOSE_FILE" ps
+
+
+            # ========================================
+            # DOCKER PS
+            # ========================================
 
             echo "================================"
             echo "DOCKER PS"
@@ -180,6 +261,79 @@ jobs:
 
             docker ps
 
+
+            # ========================================
+            # HEALTH CHECK
+            # ========================================
+
+            echo "================================"
+            echo "HEALTH CHECK"
+            echo "================================"
+
+            CONTAINER_ID=$(docker compose -f "$COMPOSE_FILE" ps -q)
+
+            if [ -n "$CONTAINER_ID" ]; then
+
+              echo "Container:"
+              echo "$CONTAINER_ID"
+
+              docker inspect \
+                --format='{{.State.Status}}' \
+                "$CONTAINER_ID" || true
+
+              docker inspect \
+                --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
+                "$CONTAINER_ID" || true
+
+            else
+
+              echo "ERROR: Container was not created"
+
+              docker compose -f "$COMPOSE_FILE" logs --tail=100 || true
+
+              exit 1
+
+            fi
+
+
+            # ========================================
+            # PORT 5555
+            # ========================================
+
+            echo "================================"
+            echo "CHECKING PORT 5555"
+            echo "================================"
+
+            sudo ss -lntp | grep 5555 || true
+
+
+            # ========================================
+            # DOCKER LOGS
+            # ========================================
+
+            echo "================================"
+            echo "LAST 50 LOGS"
+            echo "================================"
+
+            docker compose \
+              -f "$COMPOSE_FILE" \
+              logs \
+              --tail=50
+
+
+            # ========================================
+            # FINAL
+            # ========================================
+
             echo "================================"
             echo "DEPLOYMENT COMPLETED"
             echo "================================"
+
+            echo "Application directory:"
+            echo "$APP_DIR"
+
+            echo "Docker containers:"
+            docker ps
+
+            echo "Port 5555:"
+            sudo ss -lntp | grep 5555 || true
