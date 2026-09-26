@@ -5,118 +5,149 @@ on:
     branches:
       - main
 
+  workflow_dispatch:
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
 
-      # ========================================
+      # ============================================================
       # 1. CHECKOUT
-      # ========================================
+      # ============================================================
       - name: Checkout repository
         uses: actions/checkout@v4
 
 
-      # ========================================
+      # ============================================================
       # 2. PREPARE VPS
-      # ========================================
+      # ============================================================
       - name: Prepare VPS
-        uses: appleboy/ssh-action@v1.0.0
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: ${{ secrets.VPS_SSH_PORT }}
 
-          timeout: 30s
+          timeout: 60s
           command_timeout: 10m
+
+          script_stop: true
 
           script: |
             set -e
 
             APP_DIR="/opt/il2cpp-dumper-server"
 
-            echo "================================"
+            echo "========================================"
             echo "SSH CONNECTION SUCCESS"
-            echo "================================"
+            echo "========================================"
 
             echo "User:"
             whoami
 
+            echo ""
             echo "UID:"
             id
 
+            echo ""
             echo "Hostname:"
             hostname
 
-            echo "================================"
-            echo "CHECKING DEPLOYMENT DIRECTORY"
-            echo "================================"
-
-            if [ ! -d "$APP_DIR" ]; then
-              echo "ERROR: $APP_DIR does not exist."
-              echo "Please create it once manually on VPS:"
-              echo "mkdir -p $APP_DIR"
-              exit 1
-            fi
-
-            echo "Directory:"
-            ls -ld "$APP_DIR"
-
-            echo "================================"
-            echo "CHECKING DOCKER ACCESS"
-            echo "================================"
+            echo ""
+            echo "========================================"
+            echo "CHECKING DOCKER"
+            echo "========================================"
 
             docker --version
             docker compose version
 
-            echo "================================"
-            echo "STOPPING OLD CONTAINER"
-            echo "================================"
+            echo ""
+            echo "========================================"
+            echo "CHECKING DOCKER PERMISSION"
+            echo "========================================"
+
+            docker ps
+
+            echo ""
+            echo "========================================"
+            echo "PREPARING APPLICATION DIRECTORY"
+            echo "========================================"
+
+            # Thư mục đã tồn tại trên VPS.
+            # Không dùng sudo vì GitHub Actions SSH không có TTY.
+            if [ ! -d "$APP_DIR" ]; then
+                echo "ERROR: $APP_DIR does not exist."
+                echo ""
+                echo "Run this once manually on VPS:"
+                echo "mkdir -p $APP_DIR"
+                exit 1
+            fi
+
+            echo "Application directory:"
+            ls -ld "$APP_DIR"
+
+            echo ""
+            echo "Current owner:"
+            stat -c '%U:%G' "$APP_DIR"
+
+            echo ""
+            echo "========================================"
+            echo "CHECKING EXISTING CONTAINER"
+            echo "========================================"
 
             cd "$APP_DIR"
 
             if [ -f "docker-compose.yml" ]; then
 
-              echo "docker-compose.yml found"
+                echo "Found docker-compose.yml"
 
-              docker compose down --remove-orphans || true
+                docker compose -f docker-compose.yml down \
+                  --remove-orphans || true
 
             elif [ -f "docker-compose.yaml" ]; then
 
-              echo "docker-compose.yaml found"
+                echo "Found docker-compose.yaml"
 
-              docker compose down --remove-orphans || true
+                docker compose -f docker-compose.yaml down \
+                  --remove-orphans || true
 
             else
 
-              echo "No existing compose file."
-              echo "Nothing to stop."
+                echo "No existing compose file."
+                echo "Nothing to stop."
 
             fi
 
-            echo "================================"
-            echo "CLEANING OLD FILES"
-            echo "================================"
+            echo ""
+            echo "========================================"
+            echo "REMOVING OLD DEPLOYMENT FILES"
+            echo "========================================"
 
+            # Xóa source cũ.
+            #
+            # uploads và data cũng sẽ bị xóa nếu nằm trong thư mục này.
+            # Nếu muốn giữ dữ liệu upload, xem phần ghi chú bên dưới.
             find "$APP_DIR" \
               -mindepth 1 \
               -maxdepth 1 \
               -exec rm -rf {} +
 
-            echo "Old files removed."
+            echo "Old deployment removed."
 
-            echo "================================"
+            echo ""
+            echo "========================================"
             echo "DIRECTORY READY"
-            echo "================================"
+            echo "========================================"
 
             ls -la "$APP_DIR"
 
 
-      # ========================================
-      # 3. COPY PROJECT
-      # ========================================
+      # ============================================================
+      # 3. COPY PROJECT TO VPS
+      # ============================================================
       - name: Copy files to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -129,26 +160,29 @@ jobs:
 
           target: "/opt/il2cpp-dumper-server"
 
-          timeout: 60s
-          command_timeout: 10m
+          timeout: 120s
+          command_timeout: 15m
 
-          rm: false
           overwrite: true
 
+          rm: false
 
-      # ========================================
+
+      # ============================================================
       # 4. BUILD + RUN
-      # ========================================
+      # ============================================================
       - name: Build and run application
-        uses: appleboy/ssh-action@v1.0.0
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: ${{ secrets.VPS_SSH_PORT }}
 
-          timeout: 30s
+          timeout: 60s
           command_timeout: 30m
+
+          script_stop: true
 
           script: |
             set -e
@@ -157,183 +191,295 @@ jobs:
 
             cd "$APP_DIR"
 
-            echo "================================"
+            echo "========================================"
             echo "DEPLOYMENT DIRECTORY"
-            echo "================================"
+            echo "========================================"
 
             pwd
             ls -la
 
-
-            # ========================================
-            # CHECK PACKAGE.JSON
-            # ========================================
-
-            echo "================================"
+            echo ""
+            echo "========================================"
             echo "CHECKING REQUIRED FILES"
-            echo "================================"
+            echo "========================================"
 
             if [ ! -f "package.json" ]; then
 
-              echo "ERROR: package.json not found"
+                echo "ERROR: package.json not found."
 
-              echo "Files in directory:"
-              ls -la
+                echo ""
+                echo "Files:"
+                find . -maxdepth 2 -type f | sort | head -100
 
-              exit 1
-
+                exit 1
             fi
 
+            echo "package.json: OK"
 
-            # ========================================
-            # FIND COMPOSE FILE
-            # ========================================
+
+            # ========================================================
+            # FIND DOCKER COMPOSE
+            # ========================================================
+
+            echo ""
+            echo "========================================"
+            echo "FINDING DOCKER COMPOSE FILE"
+            echo "========================================"
 
             if [ -f "docker-compose.yml" ]; then
 
-              COMPOSE_FILE="docker-compose.yml"
+                COMPOSE_FILE="docker-compose.yml"
 
             elif [ -f "docker-compose.yaml" ]; then
 
-              COMPOSE_FILE="docker-compose.yaml"
+                COMPOSE_FILE="docker-compose.yaml"
 
             else
 
-              echo "ERROR: docker-compose.yml / docker-compose.yaml not found"
+                echo "ERROR:"
+                echo "docker-compose.yml / docker-compose.yaml not found."
 
-              ls -la
+                ls -la
 
-              exit 1
-
+                exit 1
             fi
 
-            echo "Using compose file:"
+            echo "Compose file:"
             echo "$COMPOSE_FILE"
 
 
-            # ========================================
+            # ========================================================
             # DOCKER CHECK
-            # ========================================
+            # ========================================================
 
-            echo "================================"
+            echo ""
+            echo "========================================"
             echo "DOCKER VERSION"
-            echo "================================"
+            echo "========================================"
 
             docker --version
             docker compose version
 
 
-            # ========================================
-            # CHECK DOCKER PERMISSION
-            # ========================================
-
-            echo "================================"
+            echo ""
+            echo "========================================"
             echo "DOCKER ACCESS"
-            echo "================================"
+            echo "========================================"
 
             docker ps
 
 
-            # ========================================
+            # ========================================================
+            # REMOVE OLD CONTAINERS
+            # ========================================================
+
+            echo ""
+            echo "========================================"
+            echo "STOPPING OLD APPLICATION"
+            echo "========================================"
+
+            docker compose \
+              -f "$COMPOSE_FILE" \
+              down \
+              --remove-orphans || true
+
+
+            # ========================================================
             # BUILD
-            # ========================================
+            # ========================================================
 
-            echo "================================"
+            echo ""
+            echo "========================================"
             echo "BUILDING APPLICATION"
-            echo "================================"
+            echo "========================================"
 
-            docker compose -f "$COMPOSE_FILE" build --no-cache
+            docker compose \
+              -f "$COMPOSE_FILE" \
+              build \
+              --no-cache
 
 
-            # ========================================
+            # ========================================================
             # START
-            # ========================================
+            # ========================================================
 
-            echo "================================"
+            echo ""
+            echo "========================================"
             echo "STARTING APPLICATION"
-            echo "================================"
+            echo "========================================"
 
-            docker compose -f "$COMPOSE_FILE" up -d
-
-
-            # ========================================
-            # WAIT FOR CONTAINER
-            # ========================================
-
-            echo "================================"
-            echo "WAITING FOR CONTAINER"
-            echo "================================"
-
-            sleep 10
+            docker compose \
+              -f "$COMPOSE_FILE" \
+              up -d
 
 
-            # ========================================
-            # CONTAINER STATUS
-            # ========================================
+            # ========================================================
+            # WAIT
+            # ========================================================
 
-            echo "================================"
-            echo "CONTAINER STATUS"
-            echo "================================"
+            echo ""
+            echo "========================================"
+            echo "WAITING FOR APPLICATION"
+            echo "========================================"
 
-            docker compose -f "$COMPOSE_FILE" ps
+            sleep 5
 
 
-            # ========================================
-            # DOCKER PS
-            # ========================================
+            # ========================================================
+            # COMPOSE STATUS
+            # ========================================================
 
-            echo "================================"
+            echo ""
+            echo "========================================"
+            echo "DOCKER COMPOSE STATUS"
+            echo "========================================"
+
+            docker compose \
+              -f "$COMPOSE_FILE" \
+              ps
+
+
+            # ========================================================
+            # DOCKER STATUS
+            # ========================================================
+
+            echo ""
+            echo "========================================"
             echo "DOCKER PS"
-            echo "================================"
+            echo "========================================"
 
-            docker ps
+            docker ps \
+              --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 
-            # ========================================
+            # ========================================================
             # PORT 5555
-            # ========================================
+            # ========================================================
 
-            echo "================================"
-            echo "PORT 5555"
-            echo "================================"
+            echo ""
+            echo "========================================"
+            echo "CHECKING PORT 5555"
+            echo "========================================"
 
-            ss -lntp | grep 5555 || true
+            ss -lntp | grep ':5555' || true
 
 
-            # ========================================
-            # HEALTH CHECK
-            # ========================================
+            # ========================================================
+            # GET CONTAINER ID
+            # ========================================================
 
-            echo "================================"
-            echo "HEALTH CHECK"
-            echo "================================"
+            echo ""
+            echo "========================================"
+            echo "CONTAINER HEALTH"
+            echo "========================================"
 
-            CONTAINER_ID=$(docker compose -f "$COMPOSE_FILE" ps -q)
+            CONTAINER_ID=$(
+              docker compose \
+                -f "$COMPOSE_FILE" \
+                ps -q
+            )
 
             if [ -n "$CONTAINER_ID" ]; then
 
-              docker inspect \
-                --format='{{.State.Status}}' \
-                "$CONTAINER_ID" || true
+                echo "Container ID:"
+                echo "$CONTAINER_ID"
 
-              docker inspect \
-                --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
-                "$CONTAINER_ID" || true
+                echo ""
+                echo "Container state:"
 
+                docker inspect \
+                  --format='{{.State.Status}}' \
+                  "$CONTAINER_ID" || true
+
+                echo ""
+                echo "Health status:"
+
+                docker inspect \
+                  --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
+                  "$CONTAINER_ID" || true
+
+            else
+
+                echo "ERROR: Container was not found."
+
+                exit 1
             fi
 
 
-            # ========================================
-            # LOGS
-            # ========================================
+            # ========================================================
+            # LOCAL HTTP TEST
+            # ========================================================
 
-            echo "================================"
+            echo ""
+            echo "========================================"
+            echo "LOCAL HTTP TEST"
+            echo "========================================"
+
+            if curl \
+              -fsS \
+              --max-time 15 \
+              http://127.0.0.1:5555/ \
+              > /tmp/il2cpp_http_test.html; then
+
+                echo "HTTP 5555: OK"
+
+                echo ""
+                echo "Response size:"
+                wc -c /tmp/il2cpp_http_test.html
+
+            else
+
+                echo "ERROR: HTTP service is not responding."
+
+                echo ""
+                echo "Container logs:"
+
+                docker compose \
+                  -f "$COMPOSE_FILE" \
+                  logs \
+                  --tail=100
+
+                exit 1
+            fi
+
+
+            # ========================================================
+            # APPLICATION LOGS
+            # ========================================================
+
+            echo ""
+            echo "========================================"
             echo "APPLICATION LOGS"
-            echo "================================"
+            echo "========================================"
 
-            docker compose -f "$COMPOSE_FILE" logs --tail=50 || true
+            docker compose \
+              -f "$COMPOSE_FILE" \
+              logs \
+              --tail=100
 
 
-            echo "================================"
+            # ========================================================
+            # FINAL STATUS
+            # ========================================================
+
+            echo ""
+            echo "========================================"
+            echo "DEPLOYMENT SUCCESS"
+            echo "========================================"
+
+            echo "Application:"
+            echo "http://127.0.0.1:5555"
+
+            echo ""
+            echo "Port:"
+            echo "5555"
+
+            echo ""
+            echo "Container:"
+            docker ps \
+              --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+            echo ""
+            echo "========================================"
             echo "DEPLOYMENT COMPLETED"
-            echo "================================"
+            echo "========================================"
