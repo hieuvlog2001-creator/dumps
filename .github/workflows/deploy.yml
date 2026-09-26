@@ -14,6 +14,7 @@ jobs:
       # ========================================
       # 1. CHECKOUT
       # ========================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -21,6 +22,7 @@ jobs:
       # ========================================
       # 2. PREPARE VPS
       # ========================================
+
       - name: Prepare VPS
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -41,22 +43,12 @@ jobs:
             echo "SSH CONNECTION SUCCESS"
             echo "========================================"
 
-            echo "User:"
             whoami
-
-            echo "UID:"
             id
-
-            echo "Hostname:"
             hostname
 
-
-            # ========================================
-            # CHECK APP DIRECTORY
-            # ========================================
-
             echo "========================================"
-            echo "CHECKING APPLICATION DIRECTORY"
+            echo "CHECKING APP DIRECTORY"
             echo "========================================"
 
             if [ ! -d "$APP_DIR" ]; then
@@ -64,13 +56,10 @@ jobs:
               mkdir -p "$APP_DIR"
             fi
 
+            cd "$APP_DIR"
+
             echo "Application directory:"
             ls -ld "$APP_DIR"
-
-
-            # ========================================
-            # CHECK DOCKER
-            # ========================================
 
             echo "========================================"
             echo "CHECKING DOCKER"
@@ -78,107 +67,47 @@ jobs:
 
             docker --version
             docker compose version
-
-            echo "Docker access:"
             docker ps
-
-
-            # ========================================
-            # STOP OLD CONTAINER
-            # ========================================
 
             echo "========================================"
             echo "STOPPING OLD CONTAINER"
             echo "========================================"
 
-            cd "$APP_DIR"
-
             if [ -f "docker-compose.yml" ]; then
 
-              echo "Found docker-compose.yml"
-
-              docker compose -f docker-compose.yml down \
-                --remove-orphans || true
+              docker compose down --remove-orphans || true
 
             elif [ -f "docker-compose.yaml" ]; then
 
-              echo "Found docker-compose.yaml"
-
-              docker compose -f docker-compose.yaml down \
-                --remove-orphans || true
-
-            else
-
-              echo "No existing compose file."
+              docker compose down --remove-orphans || true
 
             fi
 
-
-            # ========================================
-            # FIX PERMISSIONS
-            # ========================================
-
             echo "========================================"
-            echo "FIXING APPLICATION PERMISSIONS"
+            echo "REMOVING OLD APPLICATION FILES"
             echo "========================================"
 
-            CONTAINER_UID=$(id -u)
-            CONTAINER_GID=$(id -g)
-
-            echo "Host UID: $CONTAINER_UID"
-            echo "Host GID: $CONTAINER_GID"
-
-            # Use Docker itself to fix ownership.
-            # This avoids requiring sudo password.
-            docker run --rm \
-              -v "$APP_DIR:/app" \
-              busybox:latest \
-              sh -c "chown -R ${CONTAINER_UID}:${CONTAINER_GID} /app || true"
-
-            echo "Permissions fixed."
-
-
-            # ========================================
-            # CLEAN OLD APPLICATION FILES
-            # ========================================
-            #
-            # IMPORTANT:
-            # uploads and logs are preserved.
-            #
-            # This prevents:
-            # - uploaded files being deleted
-            # - generated results being deleted
-            # - server logs being deleted
-            # - permission problems
-            #
-
-            echo "========================================"
-            echo "CLEANING OLD APPLICATION FILES"
-            echo "========================================"
+            # Không xóa uploads và logs
+            # vì đây là persistent data.
 
             find "$APP_DIR" \
               -mindepth 1 \
               -maxdepth 1 \
               ! -name "uploads" \
               ! -name "logs" \
-              ! -name ".env" \
               -exec rm -rf {} +
 
             echo "Old application files removed."
 
-
-            # ========================================
-            # CREATE REQUIRED DIRECTORIES
-            # ========================================
-
             echo "========================================"
-            echo "CREATING REQUIRED DIRECTORIES"
+            echo "PREPARING PERSISTENT DIRECTORIES"
             echo "========================================"
 
             mkdir -p "$APP_DIR/uploads"
             mkdir -p "$APP_DIR/logs"
 
-            echo "Directories ready."
+            chmod 755 "$APP_DIR/uploads" || true
+            chmod 755 "$APP_DIR/logs" || true
 
             ls -la "$APP_DIR"
 
@@ -186,6 +115,7 @@ jobs:
       # ========================================
       # 3. COPY PROJECT
       # ========================================
+
       - name: Copy files to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -201,13 +131,14 @@ jobs:
           timeout: 60s
           command_timeout: 10m
 
-          overwrite: true
           rm: false
+          overwrite: true
 
 
       # ========================================
       # 4. BUILD + RUN
       # ========================================
+
       - name: Build and run application
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -226,11 +157,6 @@ jobs:
 
             cd "$APP_DIR"
 
-
-            # ========================================
-            # BASIC INFORMATION
-            # ========================================
-
             echo "========================================"
             echo "DEPLOYMENT DIRECTORY"
             echo "========================================"
@@ -248,34 +174,19 @@ jobs:
             echo "========================================"
 
             if [ ! -f "package.json" ]; then
-
               echo "ERROR: package.json not found"
-
-              echo "Files:"
-              ls -la
-
               exit 1
-
             fi
 
             if [ ! -f "Dockerfile" ]; then
-
               echo "ERROR: Dockerfile not found"
-
-              ls -la
-
               exit 1
-
             fi
 
 
             # ========================================
-            # FIND COMPOSE FILE
+            # COMPOSE FILE
             # ========================================
-
-            echo "========================================"
-            echo "CHECKING DOCKER COMPOSE"
-            echo "========================================"
 
             if [ -f "docker-compose.yml" ]; then
 
@@ -287,10 +198,7 @@ jobs:
 
             else
 
-              echo "ERROR: docker-compose.yml not found"
-
-              ls -la
-
+              echo "ERROR: docker-compose file not found"
               exit 1
 
             fi
@@ -300,7 +208,7 @@ jobs:
 
 
             # ========================================
-            # DOCKER INFORMATION
+            # DOCKER
             # ========================================
 
             echo "========================================"
@@ -310,16 +218,19 @@ jobs:
             docker --version
             docker compose version
 
-
-            # ========================================
-            # DOCKER ACCESS
-            # ========================================
-
             echo "========================================"
             echo "DOCKER ACCESS"
             echo "========================================"
 
             docker ps
+
+
+            # ========================================
+            # ENSURE DIRECTORIES
+            # ========================================
+
+            mkdir -p uploads
+            mkdir -p logs
 
 
             # ========================================
@@ -330,9 +241,7 @@ jobs:
             echo "BUILDING APPLICATION"
             echo "========================================"
 
-            docker compose \
-              -f "$COMPOSE_FILE" \
-              build --no-cache
+            docker compose -f "$COMPOSE_FILE" build --no-cache
 
 
             # ========================================
@@ -343,9 +252,7 @@ jobs:
             echo "STARTING APPLICATION"
             echo "========================================"
 
-            docker compose \
-              -f "$COMPOSE_FILE" \
-              up -d
+            docker compose -f "$COMPOSE_FILE" up -d
 
 
             # ========================================
@@ -367,9 +274,7 @@ jobs:
             echo "CONTAINER STATUS"
             echo "========================================"
 
-            docker compose \
-              -f "$COMPOSE_FILE" \
-              ps
+            docker compose -f "$COMPOSE_FILE" ps
 
 
             # ========================================
@@ -402,28 +307,34 @@ jobs:
             echo "LOCAL HEALTH CHECK"
             echo "========================================"
 
-            if curl -fsS \
-              --max-time 15 \
-              http://127.0.0.1:5555/api/health
-            then
+            if curl -fsS --max-time 10 \
+              http://127.0.0.1:5555/api/health; then
 
-              echo ""
-              echo "HEALTH CHECK: OK"
+              echo
+              echo "LOCAL HEALTH CHECK: OK"
 
             else
 
-              echo ""
-              echo "HEALTH CHECK: FAILED"
+              echo
+              echo "LOCAL HEALTH CHECK FAILED"
 
-              echo "Checking container logs..."
-
-              docker compose \
-                -f "$COMPOSE_FILE" \
-                logs --tail=100
+              docker compose -f "$COMPOSE_FILE" logs --tail=100
 
               exit 1
 
             fi
+
+
+            # ========================================
+            # ROOT HTTP CHECK
+            # ========================================
+
+            echo "========================================"
+            echo "ROOT HTTP CHECK"
+            echo "========================================"
+
+            curl -I --max-time 10 \
+              http://127.0.0.1:5555/ || true
 
 
             # ========================================
@@ -436,30 +347,23 @@ jobs:
 
             CONTAINER_ID=$(docker compose \
               -f "$COMPOSE_FILE" \
-              ps -q il2cpp-dumper 2>/dev/null || true)
+              ps -q il2cpp-dumper)
 
             if [ -n "$CONTAINER_ID" ]; then
 
-              echo "Container ID:"
-              echo "$CONTAINER_ID"
-
-              echo "Container status:"
-
               docker inspect \
-                --format='{{.State.Status}}' \
+                --format='STATUS={{.State.Status}}' \
                 "$CONTAINER_ID" || true
 
-              echo "Health status:"
-
               docker inspect \
-                --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
+                --format='HEALTH={{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
                 "$CONTAINER_ID" || true
 
             fi
 
 
             # ========================================
-            # APPLICATION LOGS
+            # LOGS
             # ========================================
 
             echo "========================================"
@@ -471,31 +375,12 @@ jobs:
               logs --tail=50 || true
 
 
-            # ========================================
-            # FINAL TEST
-            # ========================================
-
             echo "========================================"
-            echo "FINAL PORT TEST"
-            echo "========================================"
-
-            curl \
-              --max-time 15 \
-              -I \
-              http://127.0.0.1:5555/ || true
-
-
-            # ========================================
-            # DEPLOYMENT SUCCESS
-            # ========================================
-
-            echo ""
-            echo "========================================"
-            echo "DEPLOYMENT COMPLETED SUCCESSFULLY"
+            echo "DEPLOYMENT COMPLETED"
             echo "========================================"
 
             echo "Application:"
-            echo "http://127.0.0.1:5555"
+            echo "http://127.0.0.1:5555/"
 
             echo "Port:"
             echo "5555"
