@@ -80,7 +80,7 @@ jobs:
 
           source: "."
           target: "/opt/il2cpp-dumper-server"
-          rm: true
+          rm: false
 
           timeout: 60s
 
