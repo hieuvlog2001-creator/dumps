@@ -10,11 +10,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ========================================
+      # 1. CHECKOUT
+      # ========================================
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # ========================================
-      # 1. TEST SSH + PREPARE VPS
+      # 2. TEST SSH + PREPARE VPS
       # ========================================
       - name: Prepare deployment directory
         uses: appleboy/ssh-action@v1.0.0
@@ -25,6 +29,7 @@ jobs:
           port: ${{ secrets.VPS_SSH_PORT }}
           timeout: 30s
           command_timeout: 10m
+
           script: |
             set -e
 
@@ -35,31 +40,35 @@ jobs:
             echo "User:"
             whoami
 
-            echo "UID:"
+            echo "UID / GROUPS:"
             id
 
             echo "Hostname:"
             hostname
 
             echo "================================"
-            echo "Preparing deployment directory"
+            echo "DOCKER TEST"
+            echo "================================"
+
+            docker --version
+            docker compose version
+            docker ps
+
+            echo "================================"
+            echo "PREPARING DEPLOYMENT DIRECTORY"
             echo "================================"
 
             APP_DIR="/opt/il2cpp-dumper-server"
 
-            sudo mkdir -p "$APP_DIR"
+            mkdir -p "$APP_DIR"
 
-            sudo chown -R "$(whoami):$(whoami)" "$APP_DIR"
-
-            sudo chmod 755 "$APP_DIR"
-
-            echo "Directory permissions:"
+            echo "Directory:"
             ls -ld "$APP_DIR"
 
             echo "Deployment directory ready!"
 
       # ========================================
-      # 2. COPY FILES
+      # 3. COPY PROJECT
       # ========================================
       - name: Copy files to VPS
         uses: appleboy/scp-action@v0.1.7
@@ -68,23 +77,27 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: ${{ secrets.VPS_SSH_PORT }}
+
           source: "."
           target: "/opt/il2cpp-dumper-server"
           rm: true
-          timeout: 30s
+
+          timeout: 60s
 
       # ========================================
-      # 3. BUILD + RUN
+      # 4. BUILD + RUN
       # ========================================
-      - name: Setup and run application
+      - name: Build and run application
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: ${{ secrets.VPS_SSH_PORT }}
+
           timeout: 30s
           command_timeout: 30m
+
           script: |
             set -e
 
@@ -104,7 +117,7 @@ jobs:
             echo "================================"
 
             if [ ! -f "package.json" ]; then
-              echo "ERROR: package.json not found"
+              echo "ERROR: package.json not found!"
               exit 1
             fi
 
@@ -113,18 +126,11 @@ jobs:
             elif [ -f "docker-compose.yaml" ]; then
               COMPOSE_FILE="docker-compose.yaml"
             else
-              echo "ERROR: docker-compose.yml not found"
+              echo "ERROR: docker-compose.yml not found!"
               exit 1
             fi
 
             echo "Using: $COMPOSE_FILE"
-
-            echo "================================"
-            echo "NODE VERSION"
-            echo "================================"
-
-            node --version || true
-            npm --version || true
 
             echo "================================"
             echo "DOCKER VERSION"
@@ -137,25 +143,25 @@ jobs:
             echo "STOPPING OLD CONTAINERS"
             echo "================================"
 
-            docker compose down --remove-orphans || true
+            docker compose -f "$COMPOSE_FILE" down --remove-orphans || true
 
             echo "================================"
             echo "BUILDING APPLICATION"
             echo "================================"
 
-            docker compose build --no-cache
+            docker compose -f "$COMPOSE_FILE" build --no-cache
 
             echo "================================"
             echo "STARTING APPLICATION"
             echo "================================"
 
-            docker compose up -d
+            docker compose -f "$COMPOSE_FILE" up -d
 
             echo "================================"
             echo "CONTAINER STATUS"
             echo "================================"
 
-            docker compose ps
+            docker compose -f "$COMPOSE_FILE" ps
 
             echo "================================"
             echo "DOCKER PS"
