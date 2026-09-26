@@ -22,7 +22,7 @@ jobs:
       # 2. PREPARE VPS
       # ========================================
       - name: Prepare VPS
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
@@ -52,7 +52,7 @@ jobs:
 
 
             # ========================================
-            # CREATE APP DIRECTORY
+            # CHECK APP DIRECTORY
             # ========================================
 
             echo "========================================"
@@ -61,7 +61,6 @@ jobs:
 
             if [ ! -d "$APP_DIR" ]; then
               echo "Creating $APP_DIR"
-
               mkdir -p "$APP_DIR"
             fi
 
@@ -70,7 +69,7 @@ jobs:
 
 
             # ========================================
-            # DOCKER CHECK
+            # CHECK DOCKER
             # ========================================
 
             echo "========================================"
@@ -80,7 +79,7 @@ jobs:
             docker --version
             docker compose version
 
-            echo "Docker permission:"
+            echo "Docker access:"
             docker ps
 
 
@@ -111,69 +110,77 @@ jobs:
             else
 
               echo "No existing compose file."
-              echo "Nothing to stop."
 
             fi
 
 
             # ========================================
-            # FIX ROOT-OWNED FILES
+            # FIX PERMISSIONS
             # ========================================
 
             echo "========================================"
-            echo "CLEANING ROOT-OWNED DEPLOYMENT FILES"
+            echo "FIXING APPLICATION PERMISSIONS"
             echo "========================================"
 
-            if [ -d "$APP_DIR" ]; then
+            CONTAINER_UID=$(id -u)
+            CONTAINER_GID=$(id -g)
 
-              echo "Using Docker to remove root-owned files."
+            echo "Host UID: $CONTAINER_UID"
+            echo "Host GID: $CONTAINER_GID"
 
-              docker run --rm \
-                -v "$APP_DIR:/cleanup" \
-                alpine:latest \
-                sh -c '
-                  find /cleanup \
-                    -mindepth 1 \
-                    -maxdepth 1 \
-                    ! -name uploads \
-                    -exec rm -rf -- {} +
-                '
+            # Use Docker itself to fix ownership.
+            # This avoids requiring sudo password.
+            docker run --rm \
+              -v "$APP_DIR:/app" \
+              busybox:latest \
+              sh -c "chown -R ${CONTAINER_UID}:${CONTAINER_GID} /app || true"
 
-            fi
+            echo "Permissions fixed."
+
+
+            # ========================================
+            # CLEAN OLD APPLICATION FILES
+            # ========================================
+            #
+            # IMPORTANT:
+            # uploads and logs are preserved.
+            #
+            # This prevents:
+            # - uploaded files being deleted
+            # - generated results being deleted
+            # - server logs being deleted
+            # - permission problems
+            #
+
+            echo "========================================"
+            echo "CLEANING OLD APPLICATION FILES"
+            echo "========================================"
+
+            find "$APP_DIR" \
+              -mindepth 1 \
+              -maxdepth 1 \
+              ! -name "uploads" \
+              ! -name "logs" \
+              ! -name ".env" \
+              -exec rm -rf {} +
 
             echo "Old application files removed."
 
-            echo "Current directory:"
+
+            # ========================================
+            # CREATE REQUIRED DIRECTORIES
+            # ========================================
+
+            echo "========================================"
+            echo "CREATING REQUIRED DIRECTORIES"
+            echo "========================================"
+
+            mkdir -p "$APP_DIR/uploads"
+            mkdir -p "$APP_DIR/logs"
+
+            echo "Directories ready."
+
             ls -la "$APP_DIR"
-
-
-            # ========================================
-            # FIX DIRECTORY OWNERSHIP
-            # ========================================
-
-            echo "========================================"
-            echo "FIXING DIRECTORY OWNERSHIP"
-            echo "========================================"
-
-            # Chown bằng Docker vì user SSH không có sudo password.
-            docker run --rm \
-              -v "$APP_DIR:/cleanup" \
-              alpine:latest \
-              sh -c '
-                chown -R 1000:1000 /cleanup
-              '
-
-
-            echo "Ownership after cleanup:"
-            ls -ld "$APP_DIR"
-
-            if [ -d "$APP_DIR/uploads" ]; then
-              ls -ld "$APP_DIR/uploads"
-            fi
-
-            echo "========================================"
-            echo "VPS PREPARATION COMPLETED"
-            echo "========================================"
 
 
       # ========================================
@@ -194,15 +201,15 @@ jobs:
           timeout: 60s
           command_timeout: 10m
 
-          rm: false
           overwrite: true
+          rm: false
 
 
       # ========================================
       # 4. BUILD + RUN
       # ========================================
       - name: Build and run application
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
@@ -221,7 +228,7 @@ jobs:
 
 
             # ========================================
-            # DEPLOYMENT DIRECTORY
+            # BASIC INFORMATION
             # ========================================
 
             echo "========================================"
@@ -233,7 +240,7 @@ jobs:
 
 
             # ========================================
-            # CHECK PACKAGE.JSON
+            # REQUIRED FILES
             # ========================================
 
             echo "========================================"
@@ -251,7 +258,15 @@ jobs:
 
             fi
 
-            echo "package.json OK"
+            if [ ! -f "Dockerfile" ]; then
+
+              echo "ERROR: Dockerfile not found"
+
+              ls -la
+
+              exit 1
+
+            fi
 
 
             # ========================================
@@ -285,7 +300,7 @@ jobs:
 
 
             # ========================================
-            # DOCKER CHECK
+            # DOCKER INFORMATION
             # ========================================
 
             echo "========================================"
@@ -308,20 +323,6 @@ jobs:
 
 
             # ========================================
-            # REMOVE OLD BUILD
-            # ========================================
-
-            echo "========================================"
-            echo "REMOVING OLD BUILD"
-            echo "========================================"
-
-            docker compose \
-              -f "$COMPOSE_FILE" \
-              down \
-              --remove-orphans || true
-
-
-            # ========================================
             # BUILD
             # ========================================
 
@@ -331,8 +332,7 @@ jobs:
 
             docker compose \
               -f "$COMPOSE_FILE" \
-              build \
-              --no-cache
+              build --no-cache
 
 
             # ========================================
@@ -395,34 +395,33 @@ jobs:
 
 
             # ========================================
-            # LOCAL HTTP TEST
+            # LOCAL HEALTH CHECK
             # ========================================
 
             echo "========================================"
-            echo "LOCAL HTTP TEST"
+            echo "LOCAL HEALTH CHECK"
             echo "========================================"
 
             if curl -fsS \
               --max-time 15 \
-              http://127.0.0.1:5555/ \
-              > /tmp/il2cpp-health.html; then
+              http://127.0.0.1:5555/api/health
+            then
 
-              echo "HTTP TEST: SUCCESS"
-
-              head -c 500 /tmp/il2cpp-health.html || true
-
-              echo
+              echo ""
+              echo "HEALTH CHECK: OK"
 
             else
 
-              echo "HTTP TEST: FAILED"
+              echo ""
+              echo "HEALTH CHECK: FAILED"
 
-              echo "Container logs:"
-              
+              echo "Checking container logs..."
+
               docker compose \
                 -f "$COMPOSE_FILE" \
-                logs \
-                --tail=100 || true
+                logs --tail=100
+
+              exit 1
 
             fi
 
@@ -435,45 +434,28 @@ jobs:
             echo "CONTAINER HEALTH"
             echo "========================================"
 
-            CONTAINER_ID=$(
-              docker compose \
-                -f "$COMPOSE_FILE" \
-                ps -q
-            )
+            CONTAINER_ID=$(docker compose \
+              -f "$COMPOSE_FILE" \
+              ps -q il2cpp-dumper 2>/dev/null || true)
 
             if [ -n "$CONTAINER_ID" ]; then
 
               echo "Container ID:"
               echo "$CONTAINER_ID"
 
-              echo "Container state:"
+              echo "Container status:"
 
               docker inspect \
                 --format='{{.State.Status}}' \
                 "$CONTAINER_ID" || true
 
-              echo "Health:"
+              echo "Health status:"
 
               docker inspect \
                 --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
                 "$CONTAINER_ID" || true
 
-            else
-
-              echo "ERROR: Container was not created."
-
             fi
-
-
-            # ========================================
-            # PORT CHECK
-            # ========================================
-
-            echo "========================================"
-            echo "PORT CHECK"
-            echo "========================================"
-
-            ss -lntp | grep ':5555' || true
 
 
             # ========================================
@@ -486,23 +468,36 @@ jobs:
 
             docker compose \
               -f "$COMPOSE_FILE" \
-              logs \
-              --tail=100 || true
+              logs --tail=50 || true
 
 
             # ========================================
-            # FINAL STATUS
+            # FINAL TEST
             # ========================================
 
             echo "========================================"
-            echo "FINAL CONTAINER STATUS"
+            echo "FINAL PORT TEST"
             echo "========================================"
 
-            docker compose \
-              -f "$COMPOSE_FILE" \
-              ps
+            curl \
+              --max-time 15 \
+              -I \
+              http://127.0.0.1:5555/ || true
 
 
+            # ========================================
+            # DEPLOYMENT SUCCESS
+            # ========================================
+
+            echo ""
             echo "========================================"
-            echo "DEPLOYMENT COMPLETED"
+            echo "DEPLOYMENT COMPLETED SUCCESSFULLY"
+            echo "========================================"
+
+            echo "Application:"
+            echo "http://127.0.0.1:5555"
+
+            echo "Port:"
+            echo "5555"
+
             echo "========================================"
