@@ -13,18 +13,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ==========================================
       # 1. Prepare VPS
+      # ==========================================
       - name: Prepare deployment directory
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
+          username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: ${{ secrets.VPS_SSH_PORT }}
           timeout: 30s
           command_timeout: 10m
           script: |
             set -e
+
+            echo "================================"
+            echo "SSH CONNECTION SUCCESS"
+            echo "================================"
+
+            echo "User:"
+            whoami
+
+            echo "Hostname:"
+            hostname
 
             echo "Preparing deployment directory..."
 
@@ -35,12 +47,14 @@ jobs:
 
             echo "Deployment directory ready!"
 
+      # ==========================================
       # 2. Copy project to VPS
+      # ==========================================
       - name: Copy files to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
+          username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: ${{ secrets.VPS_SSH_PORT }}
           source: "."
@@ -48,12 +62,14 @@ jobs:
           rm: true
           timeout: 30s
 
+      # ==========================================
       # 3. Build and run
+      # ==========================================
       - name: Setup and run application
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
+          username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
           port: ${{ secrets.VPS_SSH_PORT }}
           timeout: 30s
@@ -61,7 +77,17 @@ jobs:
           script: |
             set -e
 
-            cd /opt/il2cpp-dumper-server
+            APP_DIR="/opt/il2cpp-dumper-server"
+
+            cd "$APP_DIR"
+
+            echo "================================"
+            echo "Current directory:"
+            pwd
+            echo "================================"
+
+            echo "Files:"
+            ls -la
 
             echo "================================"
             echo "Checking required files..."
@@ -80,10 +106,24 @@ jobs:
             echo "Required files found."
 
             echo "================================"
+            echo "Node / NPM version"
+            echo "================================"
+
+            node --version
+            npm --version
+
+            echo "================================"
+            echo "Docker version"
+            echo "================================"
+
+            docker --version
+            docker compose version
+
+            echo "================================"
             echo "Installing dependencies..."
             echo "================================"
 
-            npm install --production
+            npm install --omit=dev
 
             echo "================================"
             echo "Stopping old containers..."
@@ -109,3 +149,9 @@ jobs:
 
             echo "Container status:"
             docker ps
+
+            echo "================================"
+            echo "Docker compose status:"
+            echo "================================"
+
+            docker compose ps
