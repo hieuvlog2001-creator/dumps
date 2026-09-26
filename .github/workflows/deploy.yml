@@ -1,0 +1,81 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          script: |
+            echo "Preparing deployment directory..."
+            APP_DIR="/opt/il2cpp-dumper-server"
+            
+            # Create directory and clean up
+            mkdir -p $APP_DIR
+            rm -rf $APP_DIR/*
+            
+            echo "Deployment directory ready!"
+
+      - name: Copy files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          source: "."
+          target: "/opt/il2cpp-dumper-server"
+          rm: true
+
+      - name: Setup and run application
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          script: |
+            cd /opt/il2cpp-dumper-server || exit 1
+            
+            echo "Checking for required files..."
+            
+            # Check if package.json exists
+            if [ ! -f "package.json" ]; then
+              echo "Error: package.json not found in repository"
+              exit 1
+            fi
+            
+            # Check for docker-compose file
+            if [ ! -f "docker-compose.yml" ] && [ ! -f "docker-compose.yaml" ]; then
+              echo "Error: docker-compose configuration not found"
+              exit 1
+            fi
+            
+            echo "Installing/updating dependencies..."
+            npm install --production
+            
+            echo "Stopping existing containers..."
+            docker compose down --remove-orphans 2>/dev/null || docker-compose down --remove-orphans 2>/dev/null || true
+            
+            echo "Starting containers..."
+            docker compose up -d --build || docker-compose up -d --build
+            
+            echo "Deployment completed successfully!"
+            
+            # Optional: Show container status
+            echo "Container status:"
+            docker ps
